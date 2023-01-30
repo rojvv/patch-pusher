@@ -1,0 +1,8 @@
+services:
+  server:
+    build: .
+    tty: true
+    env_file: .env
+    stdin_open: true
+    network_mode: host
+    restart: unless-stopped
