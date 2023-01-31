@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 	"io"
-	"mime/multipart"
 	"net/http"
 	"os"
 	"os/exec"
@@ -16,7 +15,7 @@ import (
 type QueueItem struct {
 	repository string
 	branch     string
-	patch      *multipart.FileHeader
+	file       io.ReadCloser
 }
 
 var queue = make(chan QueueItem)
@@ -37,20 +36,33 @@ func handleRequest(rw http.ResponseWriter, r *http.Request) {
 	} else {
 		var repository string
 		var branch string
-		var patch *multipart.FileHeader
+		var file io.ReadCloser
 		if values := r.MultipartForm.Value["repository"]; len(values) == 1 {
 			repository = values[0]
 		}
 		if values := r.MultipartForm.Value["branch"]; len(values) == 1 {
 			branch = values[0]
 		}
-		if values := r.MultipartForm.File["patch"]; len(values) == 1 {
-			patch = r.MultipartForm.File["patch"][0]
+		if values := r.MultipartForm.File["file"]; len(values) == 1 {
+			file, err = r.MultipartForm.File["file"][0].Open()
+			if err != nil {
+				rw.WriteHeader(http.StatusInternalServerError)
+				return
+			}
 		}
-		if repository == "" || branch == "" || patch == nil {
+		if values := r.MultipartForm.Value["url"]; len(values) == 1 {
+			url := r.MultipartForm.Value["url"][0]
+			res, err := http.Get(url)
+			if err != nil {
+				rw.WriteHeader(http.StatusInternalServerError)
+				return
+			}
+			file = res.Body
+		}
+		if repository == "" || branch == "" || file == nil {
 			rw.WriteHeader(http.StatusBadRequest)
 		} else {
-			queue <- QueueItem{repository, branch, patch}
+			queue <- QueueItem{repository, branch, file}
 			log.Info().Msg("Queued a valid request.")
 			rw.WriteHeader(http.StatusOK)
 		}
@@ -60,6 +72,7 @@ func handleRequest(rw http.ResponseWriter, r *http.Request) {
 func worker() {
 	for {
 		item := <-queue
+		defer item.file.Close()
 		logCtx := log.With().Str("repository", item.repository).Str("branch", item.branch).Logger()
 		logCtx.Info().Msg("Started processing request.")
 		cloneDir := uuid.NewString()
@@ -69,12 +82,7 @@ func worker() {
 			return
 		}
 		logCtx.Info().Dur("timeElapsed", time.Since(cloneStart)).Msg("Repository cloned.")
-		file, err := item.patch.Open()
-		if err != nil {
-			logCtx.Err(err).Msg("Failed to open patch.")
-			return
-		}
-		if err := execGitCommand(cloneDir, "am", file, "-"); err != nil {
+		if err := execGitCommand(cloneDir, "am", item.file, "-"); err != nil {
 			logCtx.Err(err).Msg("Failed to apply patch.")
 			return
 		}
@@ -93,7 +101,7 @@ func worker() {
 	}
 }
 
-func execGitCommand(dir string, name string, file multipart.File, args ...string) error {
+func execGitCommand(dir string, name string, file io.Reader, args ...string) error {
 	args = append([]string{name, "--quiet"}, args...)
 	cmd := exec.Command("git", args...)
 	cmd.Dir = dir
