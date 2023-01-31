@@ -46,6 +46,7 @@ func handleRequest(rw http.ResponseWriter, r *http.Request) {
 		if values := r.MultipartForm.File["file"]; len(values) == 1 {
 			file, err = r.MultipartForm.File["file"][0].Open()
 			if err != nil {
+				log.Err(err)
 				rw.WriteHeader(http.StatusInternalServerError)
 				return
 			}
@@ -54,6 +55,7 @@ func handleRequest(rw http.ResponseWriter, r *http.Request) {
 			url := r.MultipartForm.Value["url"][0]
 			res, err := http.Get(url)
 			if err != nil {
+				log.Err(err)
 				rw.WriteHeader(http.StatusInternalServerError)
 				return
 			}
