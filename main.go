@@ -108,10 +108,10 @@ func execGitCommand(dir string, name string, file io.Reader, args ...string) err
 	cmd := exec.Command("git", args...)
 	cmd.Dir = dir
 	writer, err := cmd.StdinPipe()
-	if err := cmd.Start(); err != nil {
+	if err != nil {
 		return err
 	}
-	if err != nil {
+	if err := cmd.Start(); err != nil {
 		return err
 	}
 	if file != nil {
